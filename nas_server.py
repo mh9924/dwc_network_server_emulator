@@ -162,7 +162,14 @@ class NasHTTPServerHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                             "retry": "1",
                             "reason": "User's console is banned."
                         }
-#Comment the lines below to disable console registration
+                    elif self.server.db.console_abuse(post):
+                        logger.log(logging.DEBUG, "Login denied - Console is banned due to abuse of identifiers"+str(post))
+                        ret = {
+                            "datetime": time.strftime("%Y%m%d%H%M%S"),
+                            "returncd": "3915",
+                            "locator": "gamespy.com",
+                            "retry": "1",
+                        }
                     elif not self.server.db.pending(post):
                         logger.log(logging.DEBUG, "Login denied - Unknown console"+str(post))
                         ret = {
