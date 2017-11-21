@@ -118,7 +118,7 @@ class GamespyDatabase(object):
             tx.nonquery("CREATE TABLE IF NOT EXISTS gameinfo (profileid INT, dindex TEXT, ptype TEXT, data TEXT)")
             tx.nonquery("CREATE TABLE IF NOT EXISTS nas_logins (userid TEXT, authtoken TEXT, data TEXT)")
             tx.nonquery("CREATE TABLE IF NOT EXISTS ip_banned (ipaddr TEXT, timestamp INT(11), reason TEXT, ubtime INT(11))")
-            tx.nonquery("CREATE TABLE IF NOT EXISTS console_macadr_banned (macadr TEXT)")
+            tx.nonquery("CREATE TABLE IF NOT EXISTS console_macadr_banned (macadr TEXT, timestamp INT(11), reason TEXT, ubtime INT(11))")
             tx.nonquery("CREATE TABLE IF NOT EXISTS console_csnum_banned (csnum TEXT)")
             tx.nonquery("CREATE TABLE IF NOT EXISTS console_cfc_banned (cfc TEXT)")
             tx.nonquery("CREATE TABLE IF NOT EXISTS pending (macadr TEXT, csnum TEXT)")
@@ -412,7 +412,7 @@ class GamespyDatabase(object):
     def is_console_macadr_banned(self,postdata):
       if 'macadr' in postdata:
          with Transaction(self.conn) as tx:
-            row = tx.queryone("SELECT COUNT(*) FROM console_macadr_banned WHERE macadr = ?",(postdata['macadr'],))
+            row = tx.queryone("SELECT COUNT(*) FROM console_macadr_banned WHERE macadr = ? AND ubtime > ?",(postdata['macadr'],time.time(),))
             return int(row[0]) > 0
       else:
          return False
