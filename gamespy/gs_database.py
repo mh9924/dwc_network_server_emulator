@@ -117,13 +117,10 @@ class GamespyDatabase(object):
             tx.nonquery("CREATE TABLE IF NOT EXISTS gamestat_profile (profileid INT, dindex TEXT, ptype TEXT, data TEXT)")
             tx.nonquery("CREATE TABLE IF NOT EXISTS gameinfo (profileid INT, dindex TEXT, ptype TEXT, data TEXT)")
             tx.nonquery("CREATE TABLE IF NOT EXISTS nas_logins (userid TEXT, authtoken TEXT, data TEXT)")
-            tx.nonquery("CREATE TABLE IF NOT EXISTS ip_banned (ipaddr TEXT, timestamp INT(11), reason TEXT, ubtime INT(11))")
-            tx.nonquery("CREATE TABLE IF NOT EXISTS console_macadr_banned (macadr TEXT, timestamp INT(11), reason TEXT, ubtime INT(11))")
-            tx.nonquery("CREATE TABLE IF NOT EXISTS console_csnum_banned (csnum TEXT)")
-            tx.nonquery("CREATE TABLE IF NOT EXISTS console_cfc_banned (cfc TEXT)")
-            tx.nonquery("CREATE TABLE IF NOT EXISTS pending (macadr TEXT, csnum TEXT)")
-            tx.nonquery("CREATE TABLE IF NOT EXISTS registered (macadr TEXT, csnum TEXT)")
+            tx.nonquery("CREATE TABLE IF NOT EXISTS banned (banned_id TEXT, timestamp INT(11), reason TEXT, ubtime INT(11), type TEXT)")
+            tx.nonquery("CREATE TABLE IF NOT EXISTS consoles (macadr TEXT, csnum TEXT, platform TEXT, abuse INT, enabled INT)")
             tx.nonquery("CREATE TABLE IF NOT EXISTS allowed_games (gamecd TEXT)")
+            
             # Create some indexes for performance.
             tx.nonquery("CREATE UNIQUE INDEX IF NOT EXISTS gamestatprofile_triple on gamestat_profile(profileid,dindex,ptype)")
             tx.nonquery("CREATE UNIQUE INDEX IF NOT EXISTS users_profileid_idx ON users (profileid)")
@@ -404,86 +401,78 @@ class GamespyDatabase(object):
         else:
             return json.loads(r["data"])
 
+    def is_ap_banned(self,postdata):
+      if 'bssid' in postdata:
+         with Transaction(self.conn) as tx:
+            row = tx.queryone("SELECT COUNT(*) FROM banned WHERE banned_id = ? AND ubtime > ? AND type = 'ap'",(postdata['bssid'],time.time(),))
+            return int(row[0]) > 0
+
     def is_ip_banned(self,postdata):
         with Transaction(self.conn) as tx:
-            row = tx.queryone("SELECT COUNT(*) FROM ip_banned WHERE ipaddr = ? AND ubtime > ?",(postdata['ipaddr'],time.time(),))
+            row = tx.queryone("SELECT COUNT(*) FROM banned WHERE banned_id = ? AND ubtime > ? AND type = 'ip'",(postdata['ipaddr'],time.time(),))
             return int(row[0]) > 0
         
     def is_console_macadr_banned(self,postdata):
       if 'macadr' in postdata:
          with Transaction(self.conn) as tx:
-            row = tx.queryone("SELECT COUNT(*) FROM console_macadr_banned WHERE macadr = ? AND ubtime > ?",(postdata['macadr'],time.time(),))
+            row = tx.queryone("SELECT COUNT(*) FROM banned WHERE banned_id = ? AND ubtime > ? and type = 'console'",(postdata['macadr'],time.time(),))
             return int(row[0]) > 0
       else:
          return False
 
-    def is_console_csnum_banned(self,postdata):
+    def console_register(self,postdata):
       if 'csnum' in postdata:
          with Transaction(self.conn) as tx:
-            row = tx.queryone("SELECT COUNT(*) FROM console_csnum_banned WHERE csnum = ?",(postdata['csnum'],))
-            return int(row[0]) > 0
+             row = tx.queryone("SELECT COUNT(*) FROM consoles WHERE macadr = ? and platform = 'wii'",(postdata['macadr'],))
+             result = int(row[0])
+             if result == 0:
+                 # Change the 1 to a 0 to require manual console activation
+                 tx.nonquery("INSERT INTO consoles (macadr, csnum, platform, enabled, abuse) VALUES (?,?,'wii','1','0')", (postdata['macadr'], postdata['csnum']))
+             return result > 0
       else:
-         return False
+         with Transaction(self.conn) as tx:
+             row = tx.queryone("SELECT COUNT(*) FROM consoles WHERE macadr = ? and platform = 'other'",(postdata['macadr'],))
+             result = int(row[0])
+             if result == 0:
+                 # Change the 1 to a 0 to require manual console activation
+                 tx.nonquery("INSERT INTO consoles (macadr, platform, enabled, abuse) VALUES (?,'other','1','0')", (postdata['macadr'],))
+             return result > 0
 
-    def is_console_cfc_banned(self,postdata):
-      if 'cfc' in postdata:
-         with Transaction(self.conn) as tx:
-            row = tx.queryone("SELECT COUNT(*) FROM console_cfc_banned WHERE cfc = ?",(postdata['cfc'],))
-            return int(row[0]) > 0
-      else:
-         return False
-        
-    def pending(self,postdata):
-      if 'csnum' in postdata:
-         with Transaction(self.conn) as tx:
-             row = tx.queryone("SELECT COUNT(*) FROM pending WHERE macadr = ? and csnum = ?",(postdata['macadr'], postdata['csnum']))
-             #return int(row[0]) > 0
-             result = int(row[0])
-             if result == 0:
-                 tx.nonquery("INSERT INTO pending (macadr, csnum) VALUES (?,?)", (postdata['macadr'], postdata['csnum']))
-                 # Comment out the line below to disable auto activation of consoles
-                 tx.nonquery("INSERT INTO registered (macadr, csnum) VALUES (?,?)", (postdata['macadr'], postdata['csnum']))
-             return result > 0
-      else:
-         with Transaction(self.conn) as tx:
-             row = tx.queryone("SELECT COUNT(*) FROM pending WHERE macadr = ?",(postdata['macadr'],))
-             #return int(row[0]) > 0
-             result = int(row[0])
-             if result == 0:
-                 tx.nonquery("INSERT INTO pending (macadr) VALUES (?)", (postdata['macadr'],))
-                 # Comment out the line below to disable auto activation of consoles
-                 tx.nonquery("INSERT INTO registered (macadr) VALUES (?)", (postdata['macadr'],))
-             return result > 0
-        
-    def registered(self,postdata):
-      if 'csnum' in postdata:
-         with Transaction(self.conn) as tx:
-             row = tx.queryone("SELECT COUNT(*) FROM registered WHERE macadr = ? and csnum = ?",(postdata['macadr'], postdata['csnum']))
+    def pending_console(self,postdata):
+        with Transaction(self.conn) as tx:
+             row = tx.queryone("SELECT COUNT(*) FROM consoles WHERE macadr = ? and enabled = 0",(postdata['macadr'],))
              return int(row[0]) > 0
-      else:
-         with Transaction(self.conn) as tx:
-             row = tx.queryone("SELECT COUNT(*) FROM registered WHERE macadr = ?",(postdata['macadr'],))
-             return int(row[0]) > 0
-        
+
     def allowed_games(self,postdata):
         with Transaction(self.conn) as tx:
             row = tx.queryone("SELECT COUNT(*) FROM allowed_games WHERE gamecd = ?",(postdata['gamecd'][:3],))
             return int(row[0]) > 0
-        
+            
+    def is_profile_banned(self,postdata):
+        if 'gsbrcd' in postdata:
+            with Transaction (self.conn) as tx:
+                row = tx.queryone("SELECT COUNT(*) FROM banned WHERE banned_id = ? AND ubtime > ? AND type = 'profile'",(postdata['gsbrcd'],time.time(),))
+                return int(row[0]) > 0
+        else:
+            return False
+
     def console_abuse(self,postdata): # ONLY FOR WII CONSOLES
       if 'csnum' in postdata:
          with Transaction(self.conn) as tx:
-             row = tx.queryone("SELECT COUNT(*) FROM pending WHERE csnum = ?",(postdata['csnum'],))
-             row = tx.queryone("SELECT COUNT(*) FROM registered WHERE csnum = ?",(postdata['csnum'],))
-             #return int(row[0]) > 0
+             row = tx.queryone("SELECT COUNT(*) FROM consoles WHERE csnum = ?",(postdata['csnum'],))
              result = int(row[0])
-             if result > 1:
+             if result > 2:
+                tx.nonquery("UPDATE consoles SET abuse = 1 WHERE csnum = ?", (postdata['csnum'],))
                 return True
              else:
                 return False
              
       else:
          return False
+
+    def valid_mac(self,postdata):
+        return len(postdata["macadr"]) == 12
+
         
     def get_next_available_userid(self):
         with Transaction(self.conn) as tx:
